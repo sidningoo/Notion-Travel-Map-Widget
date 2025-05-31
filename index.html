@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,7 +7,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.4.4/d3.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -54,16 +54,13 @@
             gap: 10px;
             margin-bottom: 10px;
         }
-        input, select, button {
-            padding: 8px 12px;
-            border: 1px solid #e0e0e0;
-            border-radius: 4px;
-            font-size: 14px;
-        }
         button {
+            padding: 8px 12px;
             background: #2eaadc;
             color: white;
             border: none;
+            border-radius: 4px;
+            font-size: 14px;
             cursor: pointer;
         }
         button:hover {
@@ -85,8 +82,14 @@
             height: 15px;
             border-radius: 3px;
         }
-        .hidden {
-            display: none;
+        .select2-container {
+            width: 100% !important;
+            margin-bottom: 10px;
+        }
+        .select2-selection {
+            height: 38px !important;
+            display: flex !important;
+            align-items: center !important;
         }
     </style>
 </head>
@@ -108,12 +111,11 @@
         
         <div class="list-container">
             <div class="controls">
-                <input type="text" id="city-input" placeholder="City name">
-                <select id="country-select">
-                    <option value="">Select country</option>
-                    <!-- Countries will be populated by JS -->
+                <select id="city-select" style="width: 100%">
+                    <option value=""></option>
+                    <!-- Cities will be populated by JS -->
                 </select>
-                <button id="add-btn">Add City</button>
+                <button id="add-btn">Add Location</button>
             </div>
             <div class="city-list" id="city-list">
                 <!-- Cities will be populated here -->
@@ -127,6 +129,26 @@
             visitedCountries: [],
             cities: []
         };
+
+        // Comprehensive city database (sample - you can expand this)
+        const cityDatabase = [
+            { city: "New York", country: "United States", countryCode: "US" },
+            { city: "Los Angeles", country: "United States", countryCode: "US" },
+            { city: "London", country: "United Kingdom", countryCode: "GB" },
+            { city: "Paris", country: "France", countryCode: "FR" },
+            { city: "Tokyo", country: "Japan", countryCode: "JP" },
+            { city: "Sydney", country: "Australia", countryCode: "AU" },
+            { city: "Toronto", country: "Canada", countryCode: "CA" },
+            { city: "Berlin", country: "Germany", countryCode: "DE" },
+            { city: "Rome", country: "Italy", countryCode: "IT" },
+            { city: "Barcelona", country: "Spain", countryCode: "ES" },
+            { city: "Beijing", country: "China", countryCode: "CN" },
+            { city: "Mumbai", country: "India", countryCode: "IN" },
+            // Add more cities as needed
+        ];
+
+        // Store map variables globally
+        let svg, projection, path, countries;
 
         // Load saved data
         function loadData() {
@@ -144,32 +166,27 @@
 
         // Add a new city
         function addCity() {
-            const cityName = $('#city-input').val().trim();
-            const countryCode = $('#country-select').val();
+            const selectedOption = $('#city-select').select2('data')[0];
+            if (!selectedOption) return;
             
-            if (!cityName || !countryCode) return;
-            
-            const countryName = $('#country-select option:selected').text();
+            const cityData = JSON.parse(selectedOption.id);
             
             travelData.cities.push({
-                name: cityName,
-                countryCode: countryCode,
-                countryName: countryName,
+                name: cityData.city,
+                countryCode: cityData.countryCode,
+                countryName: cityData.country,
                 timestamp: new Date().getTime()
             });
             
             // Add country to visited if not already there
-            if (!travelData.visitedCountries.includes(countryCode)) {
-                travelData.visitedCountries.push(countryCode);
+            if (!travelData.visitedCountries.includes(cityData.countryCode)) {
+                travelData.visitedCountries.push(cityData.countryCode);
             }
             
             saveData();
             renderCityList();
-            renderMap();
-            
-            // Clear inputs
-            $('#city-input').val('');
-            $('#country-select').val('');
+            updateMapColors();
+            $('#city-select').val(null).trigger('change');
         }
 
         // Remove a city
@@ -182,7 +199,7 @@
             
             saveData();
             renderCityList();
-            renderMap();
+            updateMapColors();
         }
 
         // Render city list
@@ -213,6 +230,17 @@
             });
         }
 
+        // Update map colors without full reload
+        function updateMapColors() {
+            if (!svg) return;
+            
+            svg.selectAll(".country")
+                .attr("fill", d => {
+                    const countryCode = d.id;
+                    return travelData.visitedCountries.includes(countryCode) ? "#4a4a4a" : "#e0e0e0";
+                });
+        }
+
         // World map rendering
         function renderMap() {
             const width = $('#world-map').width();
@@ -221,20 +249,20 @@
             // Clear previous map
             $('#world-map').empty();
             
-            const svg = d3.select("#world-map")
+            svg = d3.select("#world-map")
                 .append("svg")
                 .attr("width", width)
                 .attr("height", height);
             
-            const projection = d3.geoMercator()
+            projection = d3.geoMercator()
                 .scale(width / 6)
                 .translate([width / 2, height / 1.5]);
             
-            const path = d3.geoPath().projection(projection);
+            path = d3.geoPath().projection(projection);
             
             // Load world map data
             d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(function(world) {
-                const countries = topojson.feature(world, world.objects.countries).features;
+                countries = topojson.feature(world, world.objects.countries).features;
                 
                 svg.selectAll(".country")
                     .data(countries)
@@ -251,45 +279,38 @@
             });
         }
 
-        // Populate country dropdown
-        function populateCountryDropdown() {
-            // This is a simplified list - you might want a more complete one
-            const countries = [
-                {code: "US", name: "United States"},
-                {code: "CA", name: "Canada"},
-                {code: "MX", name: "Mexico"},
-                {code: "BR", name: "Brazil"},
-                {code: "GB", name: "United Kingdom"},
-                {code: "FR", name: "France"},
-                {code: "DE", name: "Germany"},
-                {code: "IT", name: "Italy"},
-                {code: "ES", name: "Spain"},
-                {code: "CN", name: "China"},
-                {code: "JP", name: "Japan"},
-                {code: "IN", name: "India"},
-                {code: "AU", name: "Australia"},
-                // Add more countries as needed
-            ];
-            
-            const $select = $('#country-select');
-            $select.empty();
-            $select.append('<option value="">Select country</option>');
-            
-            countries.forEach(country => {
-                $select.append(`<option value="${country.code}">${country.name}</option>`);
+        // Initialize Select2 with city database
+        function initCitySelector() {
+            $('#city-select').select2({
+                placeholder: "Search for a city...",
+                data: cityDatabase.map(city => ({
+                    id: JSON.stringify(city),
+                    text: `${city.city}, ${city.country}`,
+                    city: city.city,
+                    country: city.country
+                })),
+                templateResult: formatCityOption,
+                templateSelection: formatCityOption
             });
+        }
+
+        // Format how cities appear in dropdown
+        function formatCityOption(city) {
+            if (!city.id) return city.text;
+            const data = JSON.parse(city.id);
+            return $('<span>').text(`${data.city}, ${data.country}`);
         }
 
         // Initialize
         $(document).ready(function() {
-            populateCountryDropdown();
+            initCitySelector();
             loadData();
             renderMap();
             
             $('#add-btn').click(addCity);
             
-            // Handle Enter key in input
-            $('#city-input').keypress(function(e) {
+            // Handle Enter key in select2
+            $('#city-select').on('keypress', function(e) {
                 if (e.which === 13) addCity();
             });
             
