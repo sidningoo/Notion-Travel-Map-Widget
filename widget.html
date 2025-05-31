@@ -1,0 +1,303 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travel Tracker</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.4.4/d3.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.7/dat.gui.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            margin: 0;
+            padding: 10px;
+            background: transparent;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .map-container {
+            position: relative;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        #world-map {
+            width: 100%;
+            height: 300px;
+        }
+        .list-container {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .city-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .city-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 8px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .city-item:last-child {
+            border-bottom: none;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        input, select, button {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background: #2eaadc;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #1d8ab8;
+        }
+        .legend {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            border-radius: 3px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="map-container">
+            <div id="world-map"></div>
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #4a4a4a;"></div>
+                    <span>Visited</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #e0e0e0;"></div>
+                    <span>Not Visited</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="list-container">
+            <div class="controls">
+                <input type="text" id="city-input" placeholder="City name">
+                <select id="country-select">
+                    <option value="">Select country</option>
+                    <!-- Countries will be populated by JS -->
+                </select>
+                <button id="add-btn">Add City</button>
+            </div>
+            <div class="city-list" id="city-list">
+                <!-- Cities will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Sample data - will be saved to localStorage
+        let travelData = {
+            visitedCountries: [],
+            cities: []
+        };
+
+        // Load saved data
+        function loadData() {
+            const savedData = localStorage.getItem('notionTravelWidgetData');
+            if (savedData) {
+                travelData = JSON.parse(savedData);
+            }
+            renderCityList();
+        }
+
+        // Save data
+        function saveData() {
+            localStorage.setItem('notionTravelWidgetData', JSON.stringify(travelData));
+        }
+
+        // Add a new city
+        function addCity() {
+            const cityName = $('#city-input').val().trim();
+            const countryCode = $('#country-select').val();
+            
+            if (!cityName || !countryCode) return;
+            
+            const countryName = $('#country-select option:selected').text();
+            
+            travelData.cities.push({
+                name: cityName,
+                countryCode: countryCode,
+                countryName: countryName,
+                timestamp: new Date().getTime()
+            });
+            
+            // Add country to visited if not already there
+            if (!travelData.visitedCountries.includes(countryCode)) {
+                travelData.visitedCountries.push(countryCode);
+            }
+            
+            saveData();
+            renderCityList();
+            renderMap();
+            
+            // Clear inputs
+            $('#city-input').val('');
+            $('#country-select').val('');
+        }
+
+        // Remove a city
+        function removeCity(timestamp) {
+            travelData.cities = travelData.cities.filter(city => city.timestamp !== timestamp);
+            
+            // Check if we need to remove country from visited
+            const remainingCountryCodes = [...new Set(travelData.cities.map(city => city.countryCode))];
+            travelData.visitedCountries = travelData.visitedCountries.filter(code => remainingCountryCodes.includes(code));
+            
+            saveData();
+            renderCityList();
+            renderMap();
+        }
+
+        // Render city list
+        function renderCityList() {
+            const $list = $('#city-list');
+            $list.empty();
+            
+            if (travelData.cities.length === 0) {
+                $list.append('<div class="city-item">No cities added yet</div>');
+                return;
+            }
+            
+            // Sort by country then city
+            const sortedCities = [...travelData.cities].sort((a, b) => {
+                if (a.countryName === b.countryName) {
+                    return a.name.localeCompare(b.name);
+                }
+                return a.countryName.localeCompare(b.countryName);
+            });
+            
+            sortedCities.forEach(city => {
+                $list.append(`
+                    <div class="city-item">
+                        <span>${city.name}, ${city.countryName}</span>
+                        <button onclick="removeCity(${city.timestamp})" style="background: #ff5a5a; padding: 2px 8px;">×</button>
+                    </div>
+                `);
+            });
+        }
+
+        // World map rendering
+        function renderMap() {
+            const width = $('#world-map').width();
+            const height = 300;
+            
+            // Clear previous map
+            $('#world-map').empty();
+            
+            const svg = d3.select("#world-map")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+            
+            const projection = d3.geoMercator()
+                .scale(width / 6)
+                .translate([width / 2, height / 1.5]);
+            
+            const path = d3.geoPath().projection(projection);
+            
+            // Load world map data
+            d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(function(world) {
+                const countries = topojson.feature(world, world.objects.countries).features;
+                
+                svg.selectAll(".country")
+                    .data(countries)
+                    .enter()
+                    .append("path")
+                    .attr("class", "country")
+                    .attr("d", path)
+                    .attr("fill", d => {
+                        const countryCode = d.id;
+                        return travelData.visitedCountries.includes(countryCode) ? "#4a4a4a" : "#e0e0e0";
+                    })
+                    .attr("stroke", "#fff")
+                    .attr("stroke-width", 0.5);
+            });
+        }
+
+        // Populate country dropdown
+        function populateCountryDropdown() {
+            // This is a simplified list - you might want a more complete one
+            const countries = [
+                {code: "US", name: "United States"},
+                {code: "CA", name: "Canada"},
+                {code: "MX", name: "Mexico"},
+                {code: "BR", name: "Brazil"},
+                {code: "GB", name: "United Kingdom"},
+                {code: "FR", name: "France"},
+                {code: "DE", name: "Germany"},
+                {code: "IT", name: "Italy"},
+                {code: "ES", name: "Spain"},
+                {code: "CN", name: "China"},
+                {code: "JP", name: "Japan"},
+                {code: "IN", name: "India"},
+                {code: "AU", name: "Australia"},
+                // Add more countries as needed
+            ];
+            
+            const $select = $('#country-select');
+            $select.empty();
+            $select.append('<option value="">Select country</option>');
+            
+            countries.forEach(country => {
+                $select.append(`<option value="${country.code}">${country.name}</option>`);
+            });
+        }
+
+        // Initialize
+        $(document).ready(function() {
+            populateCountryDropdown();
+            loadData();
+            renderMap();
+            
+            $('#add-btn').click(addCity);
+            
+            // Handle Enter key in input
+            $('#city-input').keypress(function(e) {
+                if (e.which === 13) addCity();
+            });
+            
+            // Responsive resize
+            $(window).resize(function() {
+                renderMap();
+            });
+        });
+    </script>
+</body>
+</html>
